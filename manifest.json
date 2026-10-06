@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
   "name": "Gemini GitHub Bridge",
-  "version": "0.1.0",
-  "description": "Connect Gemini coding responses to GitHub through a strict JSON protocol.",
+  "version": "0.2.0",
+  "description": "Connect Gemini coding responses to GitHub through a safe JSON protocol.",
   "permissions": ["storage"],
   "host_permissions": ["https://api.github.com/*"],
-  "background": {"service_worker": "background.js", "type": "module"},
+  "background": {"service_worker": "background.js"},
   "content_scripts": [
     {
       "matches": ["https://gemini.google.com/*"],
