@@ -1,0 +1,1 @@
+chrome.runtime.sendMessage({type:"GET_CONFIG"},r=>{const c=r?.config||{};document.getElementById("state").textContent=c.hasToken&&c.repository?`מחובר אל ${c.repository}\nענף: ${c.branch}`:"עדיין לא הוגדר חיבור GitHub";});document.getElementById("options").onclick=()=>chrome.runtime.openOptionsPage();
