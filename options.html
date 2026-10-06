@@ -1,1 +1,80 @@
-<!doctype html><html lang="he" dir="rtl"><meta charset="utf-8"><title>Gemini GitHub Bridge</title><style>body{font:15px Arial;max-width:760px;margin:40px auto;padding:0 18px;color:#202124}h1{font-size:24px}label{display:block;margin:16px 0 6px;font-weight:700}input,select{box-sizing:border-box;width:100%;padding:10px;border:1px solid #bbb;border-radius:9px}button{margin-top:18px;padding:10px 16px;border:0;border-radius:20px;background:#0b57d0;color:#fff;cursor:pointer}.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}.note{background:#f1f3f4;padding:12px;border-radius:10px;margin:14px 0}.status{margin-top:12px}.check{display:flex;gap:8px;align-items:center}.check input{width:auto}</style><h1>Gemini GitHub Bridge</h1><div class="note">הטוקן נשמר מקומית בתוך Chrome Storage ונשלח רק ל־GitHub API. הוא לעולם לא מוכנס לפרומפט של Gemini.</div><label>GitHub fine-grained token</label><input id="token" type="password" autocomplete="off" placeholder="github_pat_…"><label>מאגר</label><input id="repository" placeholder="owner/repository"><div class="row"><div><label>ענף בסיס</label><input id="branch" value="main"></div><div><label>מצב ברירת מחדל</label><select id="defaultMode"><option value="branch_pr">Branch + Pull Request</option><option value="commit">Commit ישיר</option></select></div></div><label class="check"><input type="checkbox" id="protocolEnabled" checked> הוסף אוטומטית את פרוטוקול ה־JSON לבקשות קוד ב-Gemini</label><button id="save">שמור ובדוק חיבור</button><div id="status" class="status"></div><script src="options.js"></script></html>
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>Gemini GitHub Bridge</title>
+<style>
+:root{font-family:Arial,sans-serif;color:#202124;background:#f7f8fa}
+body{margin:0}
+main{max-width:860px;margin:36px auto;padding:0 20px}
+.card{background:#fff;border:1px solid #e2e5e9;border-radius:18px;padding:22px;box-shadow:0 6px 24px rgba(0,0,0,.05);margin-bottom:18px}
+h1{font-size:28px;margin:0 0 6px}h2{font-size:18px;margin:0 0 14px}
+p{line-height:1.55;color:#5f6368}
+label{display:block;margin:14px 0 6px;font-weight:700}
+input,select{box-sizing:border-box;width:100%;padding:11px 12px;border:1px solid #c7c9cc;border-radius:10px;background:#fff;font-size:14px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
+button{padding:10px 16px;border:1px solid #c7c9cc;border-radius:999px;background:#fff;cursor:pointer;font-weight:700}
+button.primary{background:#0b57d0;color:#fff;border-color:#0b57d0}
+button:disabled{opacity:.55;cursor:default}
+.note{background:#eef3fd;border-radius:12px;padding:12px 14px;color:#3c4043}
+.check{display:flex;gap:9px;align-items:center;font-weight:400}.check input{width:auto}
+.status{margin-top:12px;min-height:20px}.ok{color:#137333}.err{color:#b3261e}
+.small{font-size:13px}.muted{color:#6b7280}
+@media(max-width:650px){.row{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+  <div class="card">
+    <h1>Gemini GitHub Bridge</h1>
+    <p>חיבור Gemini ל-GitHub עם אישור לפני כל כתיבה, תצוגת Diff, ו-Branch + PR כברירת מחדל.</p>
+  </div>
+
+  <div class="card">
+    <h2>חיבור ל-GitHub</h2>
+    <div class="note">הטוקן נשמר מקומית בדפדפן ונשלח רק ל-GitHub API. הוא אינו מצורף לפרומפטים של Gemini.</div>
+    <label>Fine-grained Personal Access Token</label>
+    <input id="token" type="password" autocomplete="off" placeholder="github_pat_…">
+    <div class="actions">
+      <button id="connect" class="primary">בדוק חיבור וטען מאגרים</button>
+    </div>
+    <div id="connectionStatus" class="status"></div>
+  </div>
+
+  <div class="card">
+    <h2>מאגר וענף</h2>
+    <label>מאגר</label>
+    <div class="row">
+      <select id="repositorySelect"><option value="">טען קודם את רשימת המאגרים</option></select>
+      <button id="refreshRepos">רענן מאגרים</button>
+    </div>
+
+    <label>ענף בסיס</label>
+    <div class="row">
+      <select id="branchSelect"><option value="">בחר מאגר קודם</option></select>
+      <button id="refreshBranches">רענן ענפים</button>
+    </div>
+
+    <label>מצב ברירת מחדל</label>
+    <select id="defaultMode">
+      <option value="branch_pr">Branch + Pull Request — מומלץ</option>
+      <option value="commit">Commit ישיר לענף שנבחר</option>
+    </select>
+
+    <label class="check">
+      <input type="checkbox" id="protocolEnabled" checked>
+      הוסף אוטומטית את פרוטוקול ה-JSON לבקשות קוד ב-Gemini
+    </label>
+
+    <div class="actions"><button id="save" class="primary">שמור הגדרות</button></div>
+    <div id="saveStatus" class="status"></div>
+  </div>
+
+  <div class="card small muted">
+    במצב Branch + PR כל קבוצת השינויים נוצרת ב-commit יחיד על ענף חדש, ורק לאחר מכן נפתח Pull Request.
+  </div>
+</main>
+<script src="options.js"></script>
+</body>
+</html>
