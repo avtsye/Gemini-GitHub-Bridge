@@ -1,34 +1,59 @@
 (() => {
   const PROTOCOL_MARKER = "[Gemini GitHub Bridge protocol]";
-  let lastBlocksFingerprint = "";
+  const CONTEXT_MARKER = "[Gemini GitHub Bridge context]";
+  let lastFingerprint = "";
 
+  const send = msg => new Promise(resolve => chrome.runtime.sendMessage(msg, resolve));
   async function cfg() {
-    return new Promise(resolve => chrome.runtime.sendMessage({type:"GET_CONFIG"}, r => resolve(r?.config || {})));
+    const r = await send({type:"GET_CONFIG"});
+    return r?.config || {};
   }
 
   function protocolText(c) {
     const repo = c.repository || "OWNER/REPO";
     const branch = c.branch || "main";
-    return `\n\n${PROTOCOL_MARKER}\nWhen this conversation involves code changes for the configured GitHub repository, keep your normal explanation and append exactly one machine-readable block at the very end:\n<GITHUB_EXTENSION>\n{"version":1,"repository":"${repo}","base_branch":"${branch}","mode":"${c.defaultMode || "branch_pr"}","commit_message":"...","branch_name":"...","pr_title":"...","pr_body":"...","files":[{"path":"...","action":"create|update|delete","content":"FULL FILE CONTENT for create/update"}]}\n</GITHUB_EXTENSION>\nInside the tags output valid JSON only, with no markdown fences. Never include credentials or tokens. Never target a repository other than ${repo}. Omit the block if no GitHub change is needed.`;
+    return `\n\n${PROTOCOL_MARKER}
+You are connected to GitHub repository ${repo}, base branch ${branch}.
+When a coding request requires GitHub changes, keep your normal explanation and append exactly one machine-readable block at the very end:
+<GITHUB_EXTENSION>
+{"version":1,"repository":"${repo}","base_branch":"${branch}","mode":"${c.defaultMode || "branch_pr"}","commit_message":"Short commit message","branch_name":"gemini/descriptive-name","pr_title":"Pull request title","pr_body":"Summary of the changes","files":[{"path":"relative/path.ext","action":"create|update|delete","content":"FULL FILE CONTENT for create/update"}]}
+</GITHUB_EXTENSION>
+Rules: inside the tags output valid JSON only, without Markdown fences. For create/update include the complete final file content, not a patch. Group all files that belong to the same change into this single block. Never include credentials or tokens. Never target another repository or base branch. Omit the block when no GitHub write is needed.`;
   }
 
   function findComposer() {
-    const candidates = [...document.querySelectorAll('div[contenteditable="true"], textarea')].filter(el => el.offsetParent !== null);
-    return candidates[candidates.length - 1] || null;
+    const all = [...document.querySelectorAll('div[contenteditable="true"], textarea')];
+    return all.filter(el => el.offsetParent !== null && !el.closest("#ggb-panel,#ggb-context-panel")).at(-1) || null;
   }
 
-  function getText(el) { return el instanceof HTMLTextAreaElement ? el.value : (el.innerText || ""); }
+  function getText(el) {
+    return el instanceof HTMLTextAreaElement ? el.value : (el.innerText || "");
+  }
+
   function setText(el, value) {
+    if (!el) return;
     if (el instanceof HTMLTextAreaElement) {
       const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
       setter ? setter.call(el, value) : (el.value = value);
       el.dispatchEvent(new Event("input", {bubbles:true}));
-    } else {
       el.focus();
-      document.execCommand("selectAll", false, null);
-      document.execCommand("insertText", false, value);
-      el.dispatchEvent(new InputEvent("input", {bubbles:true, inputType:"insertText", data:value}));
+      return;
     }
+    el.focus();
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    document.execCommand("insertText", false, value);
+    el.dispatchEvent(new InputEvent("input", {bubbles:true, inputType:"insertText", data:value}));
+  }
+
+  function appendToComposer(text) {
+    const el = findComposer();
+    if (!el) throw new Error("לא נמצאה תיבת ההודעה של Gemini");
+    const current = getText(el);
+    setText(el, current + (current ? "\n\n" : "") + text);
   }
 
   async function enrichComposer() {
@@ -38,7 +63,8 @@
     if (!el) return false;
     const text = getText(el);
     if (!text.trim() || text.includes(PROTOCOL_MARKER)) return false;
-    const codeish = /\b(code|github|repo|repository|commit|branch|pull request|bug|fix|file|javascript|typescript|python|html|css|json|yaml|קוד|גיטהב|מאגר|קובץ|באג|תיקון|קומיט|ענף)\b/i.test(text) || /```|\.js\b|\.ts\b|\.py\b|\.html\b|\.css\b/.test(text);
+    const codeish = /\b(code|github|repo|repository|commit|branch|pull request|bug|fix|file|javascript|typescript|python|html|css|json|yaml|קוד|גיטהב|מאגר|קובץ|באג|תיקון|קומיט|ענף|תוסף|פרויקט)\b/i.test(text) ||
+      /```|\.(js|ts|py|html|css|json|yml|yaml|md)\b/i.test(text);
     if (!codeish) return false;
     setText(el, text + protocolText(c));
     return true;
@@ -48,22 +74,29 @@
     if (e.key === "Enter" && !e.shiftKey && (e.target?.isContentEditable || e.target instanceof HTMLTextAreaElement)) {
       const did = await enrichComposer();
       if (did) {
-        e.preventDefault(); e.stopImmediatePropagation();
+        e.preventDefault();
+        e.stopImmediatePropagation();
         setTimeout(() => {
-          const btn = [...document.querySelectorAll('button')].find(b => /send|שלח/i.test((b.getAttribute('aria-label')||'') + ' ' + (b.textContent||'')) && !b.disabled);
+          const btn = [...document.querySelectorAll("button")].find(b =>
+            /send|שלח/i.test((b.getAttribute("aria-label") || "") + " " + (b.textContent || "")) && !b.disabled
+          );
           btn?.click();
-        }, 80);
+        }, 100);
       }
     }
   }, true);
 
   document.addEventListener("click", async e => {
     const btn = e.target.closest?.("button");
-    if (!btn) return;
+    if (!btn || btn.closest("#ggb-panel,#ggb-context-panel")) return;
     const label = (btn.getAttribute("aria-label") || "") + " " + (btn.textContent || "");
     if (/send|שלח/i.test(label)) {
       const did = await enrichComposer();
-      if (did) { e.preventDefault(); e.stopImmediatePropagation(); setTimeout(() => btn.click(), 80); }
+      if (did) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        setTimeout(() => btn.click(), 100);
+      }
     }
   }, true);
 
@@ -77,69 +110,181 @@
     return out;
   }
 
-  function validate(plan,c) {
-    const e=[];
-    if(plan.version!==1)e.push("Unsupported protocol version");
-    if(plan.repository!==c.repository)e.push("Repository mismatch");
-    if(!Array.isArray(plan.files)||!plan.files.length)e.push("No files");
-    if(plan.files?.length>50)e.push("Too many files");
-    if(!["commit","branch_pr"].includes(plan.mode))e.push("Bad mode");
-    for(const f of plan.files||[]){
-      if(!f.path||f.path.startsWith("/")||f.path.includes(".."))e.push(`Unsafe path: ${f.path}`);
-      if(!["create","update","delete"].includes(f.action))e.push(`Bad action: ${f.action}`);
-      if(["create","update"].includes(f.action) && typeof f.content!=="string")e.push(`Missing content: ${f.path}`);
+  function validate(plan, c) {
+    const errors = [];
+    if (plan?.version !== 1) errors.push("גרסת פרוטוקול לא נתמכת");
+    if (plan?.repository !== c.repository) errors.push("המאגר אינו תואם למאגר שנבחר");
+    if (plan?.base_branch && plan.base_branch !== c.branch) errors.push("ענף הבסיס אינו תואם לענף שנבחר");
+    if (!Array.isArray(plan?.files) || !plan.files.length) errors.push("לא התקבלו קבצים");
+    if (plan?.files?.length > 50) errors.push("יותר מדי קבצים בפעולה אחת");
+    if (!["commit","branch_pr"].includes(plan?.mode)) errors.push("מצב פעולה לא תקין");
+    for (const f of plan?.files || []) {
+      if (!f.path || f.path.startsWith("/") || f.path.includes("..")) errors.push(`נתיב לא בטוח: ${f.path || "?"}`);
+      if (!["create","update","delete"].includes(f.action)) errors.push(`פעולה לא תקינה: ${f.path || "?"}`);
+      if (["create","update"].includes(f.action) && typeof f.content !== "string") errors.push(`חסר תוכן מלא: ${f.path || "?"}`);
     }
-    return e;
+    return errors;
   }
 
-  function renderPlan(plan, c) {
+  function el(tag, cls, text) {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  async function renderPlan(plan, c) {
     document.getElementById("ggb-panel")?.remove();
-    const panel = document.createElement("div"); panel.id = "ggb-panel";
-    const title = document.createElement("div"); title.className="ggb-title"; title.textContent="GitHub change detected";
-    const meta = document.createElement("div"); meta.className="ggb-meta"; meta.textContent=`${plan.repository || "?"} • ${plan.mode || "?"} • ${plan.files?.length || 0} files`;
-    const list = document.createElement("div"); list.className="ggb-files";
-    for (const f of plan.files || []) {
-      const row=document.createElement("div");
-      row.textContent=`${f.action}  ${f.path}`;
-      list.appendChild(row);
-    }
-    const err = validate(plan,c);
-    if (err.length) {
-      const x=document.createElement("div");
-      x.className="ggb-error";
-      x.textContent=err.join(" • ");
-      panel.append(title,meta,list,x);
+    const panel = el("div"); panel.id = "ggb-panel";
+    const header = el("div","ggb-header");
+    const titles = el("div");
+    titles.append(el("div","ggb-title","שינויים מ-Gemini ל-GitHub"));
+    titles.append(el("div","ggb-meta",`${plan.repository || "?"} • ${plan.base_branch || c.branch || "?"} • ${plan.files?.length || 0} קבצים`));
+    const close = el("button","ggb-icon","×"); close.onclick = () => panel.remove();
+    header.append(titles, close);
+    panel.append(header);
+
+    const errors = validate(plan,c);
+    if (errors.length) {
+      panel.append(el("div","ggb-error",errors.join(" • ")));
       document.body.appendChild(panel);
       return;
     }
-    const actions=document.createElement("div"); actions.className="ggb-actions";
-    const dismiss=document.createElement("button"); dismiss.textContent="Dismiss"; dismiss.onclick=()=>panel.remove();
-    const apply=document.createElement("button"); apply.className="primary"; apply.textContent=plan.mode==="branch_pr"?"Create branch + PR":"Apply commit";
-    apply.onclick=async()=>{
-      apply.disabled=true; apply.textContent="Applying…";
-      const r=await new Promise(resolve=>chrome.runtime.sendMessage({type:"APPLY_PLAN", plan},resolve));
-      if(!r?.ok){apply.disabled=false;apply.textContent="Try again";alert(r?.error||"GitHub operation failed");return;}
-      apply.textContent="Done";
-      if(r.result?.pr?.html_url){
-        const a=document.createElement("a");a.href=r.result.pr.html_url;a.target="_blank";a.textContent=`Open PR #${r.result.pr.number}`;actions.appendChild(a);
+
+    const loading = el("div","ggb-loading","טוען את הגרסאות הנוכחיות ומכין Diff…");
+    panel.append(loading);
+    document.body.appendChild(panel);
+
+    const r = await send({type:"PREVIEW_PLAN", plan});
+    loading.remove();
+    if (!r?.ok) {
+      panel.append(el("div","ggb-error",r?.error || "טעינת ה-Diff נכשלה"));
+      return;
+    }
+
+    const list = el("div","ggb-diff-list");
+    for (const f of r.preview.files) {
+      const details = document.createElement("details");
+      details.className = "ggb-file";
+      const summary = document.createElement("summary");
+      const badge = el("span",`ggb-badge ${f.action}`, f.action === "create" ? "חדש" : f.action === "delete" ? "מחיקה" : "עדכון");
+      summary.append(badge, document.createTextNode(" " + f.path));
+      const pre = el("pre","ggb-diff",f.diff);
+      details.append(summary,pre);
+      list.appendChild(details);
+    }
+    panel.append(list);
+
+    const note = el("div","ggb-note", plan.mode === "branch_pr"
+      ? "כל הקבצים יישמרו ב-commit יחיד על ענף חדש, ולאחר מכן ייפתח Pull Request."
+      : "כל הקבצים יישמרו ב-commit יחיד ישירות לענף שנבחר.");
+    panel.append(note);
+
+    const actions = el("div","ggb-actions");
+    const dismiss = el("button","","ביטול"); dismiss.onclick = () => panel.remove();
+    const apply = el("button","primary",plan.mode === "branch_pr" ? "צור Branch + PR" : "בצע Commit");
+    apply.onclick = async () => {
+      apply.disabled = true;
+      apply.textContent = "מבצע…";
+      const result = await send({type:"APPLY_PLAN", plan});
+      if (!result?.ok) {
+        apply.disabled = false;
+        apply.textContent = "נסה שוב";
+        panel.append(el("div","ggb-error",result?.error || "הפעולה נכשלה"));
+        return;
+      }
+      apply.textContent = "בוצע ✓";
+      dismiss.textContent = "סגור";
+      const success = el("div","ggb-success",`Commit: ${result.result.commitSha.slice(0,7)}`);
+      panel.append(success);
+      if (result.result.pr?.html_url) {
+        const a = el("a","ggb-pr-link",`פתח PR #${result.result.pr.number}`);
+        a.href = result.result.pr.html_url;
+        a.target = "_blank";
+        actions.appendChild(a);
       }
     };
     actions.append(dismiss,apply);
-    panel.append(title,meta,list,actions);
+    panel.append(actions);
+  }
+
+  async function openContextPanel() {
+    document.getElementById("ggb-context-panel")?.remove();
+    const c = await cfg();
+    const panel = el("div"); panel.id = "ggb-context-panel";
+    const header = el("div","ggb-header");
+    const titles = el("div");
+    titles.append(el("div","ggb-title","טען קבצים מ-GitHub ל-Gemini"));
+    titles.append(el("div","ggb-meta", c.repository ? `${c.repository} • ${c.branch}` : "יש להגדיר מאגר בהגדרות התוסף"));
+    const close = el("button","ggb-icon","×"); close.onclick = () => panel.remove();
+    header.append(titles,close);
+    panel.append(header);
+
+    if (!c.repository) {
+      panel.append(el("div","ggb-error","לא הוגדר מאגר. פתח את הגדרות התוסף."));
+      document.body.appendChild(panel);
+      return;
+    }
+
+    const label = el("label","ggb-label","נתיבי קבצים — נתיב אחד בכל שורה");
+    const ta = document.createElement("textarea");
+    ta.className = "ggb-paths";
+    ta.placeholder = "src/app.js\nmanifest.json\nREADME.md";
+    const status = el("div","ggb-context-status","");
+    const actions = el("div","ggb-actions");
+    const cancel = el("button","","ביטול"); cancel.onclick = () => panel.remove();
+    const load = el("button","primary","טען לפרומפט");
+    load.onclick = async () => {
+      const paths = ta.value.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+      if (!paths.length) return status.textContent = "הכנס לפחות נתיב אחד";
+      if (paths.length > 20) return status.textContent = "אפשר לטעון עד 20 קבצים בכל פעם";
+      load.disabled = true; load.textContent = "טוען…"; status.textContent = "";
+      const r = await send({type:"READ_FILES", paths, repository:c.repository, ref:c.branch});
+      load.disabled = false; load.textContent = "טען לפרומפט";
+      if (!r?.ok) return status.textContent = r?.error || "הטעינה נכשלה";
+      let total = 0;
+      const parts = [`${CONTEXT_MARKER}\nRepository: ${r.repository}\nBranch: ${r.ref}\nUse these files as the current GitHub source of truth:`];
+      for (const f of r.files) {
+        if (f.error) { parts.push(`\nFILE: ${f.path}\nERROR: ${f.error}`); continue; }
+        total += f.content.length;
+        if (total > 180000) { parts.push("\n[Context truncated: file content limit reached]"); break; }
+        parts.push(`\nFILE: ${f.path}\n---BEGIN FILE---\n${f.content}\n---END FILE---`);
+      }
+      try {
+        appendToComposer(parts.join("\n"));
+        panel.remove();
+      } catch (e) {
+        status.textContent = e.message;
+      }
+    };
+    actions.append(cancel,load);
+    panel.append(label,ta,status,actions);
     document.body.appendChild(panel);
+    ta.focus();
+  }
+
+  function ensureLauncher() {
+    if (document.getElementById("ggb-launcher")) return;
+    const button = el("button","","GitHub");
+    button.id = "ggb-launcher";
+    button.title = "טען קבצים מ-GitHub לפרומפט";
+    button.onclick = openContextPanel;
+    document.body.appendChild(button);
   }
 
   const observer = new MutationObserver(async () => {
+    ensureLauncher();
     const text = document.body.innerText || "";
     if (!text.includes("<GITHUB_EXTENSION>")) return;
     const blocks = extractBlocks(text);
     if (!blocks.length) return;
-    const plan = blocks[blocks.length-1];
-    const fp=JSON.stringify(plan);
-    if(fp===lastBlocksFingerprint)return;
-    lastBlocksFingerprint=fp;
-    const c=await cfg();
-    renderPlan(plan,c);
+    const plan = blocks.at(-1);
+    const fp = JSON.stringify(plan);
+    if (fp === lastFingerprint) return;
+    lastFingerprint = fp;
+    renderPlan(plan, await cfg());
   });
+
   observer.observe(document.documentElement,{subtree:true,childList:true,characterData:true});
+  ensureLauncher();
 })();
