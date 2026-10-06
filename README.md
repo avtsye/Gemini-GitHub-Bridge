@@ -1,37 +1,94 @@
 # Gemini GitHub Bridge
 
-Chrome/Edge extension that adds a strict JSON protocol to coding prompts in Gemini and lets the user approve the resulting GitHub changes.
+תוסף Chrome/Edge שמוסיף ל-Gemini גשר מאובטח ל-GitHub באמצעות פרוטוקול JSON מובנה.
 
-## MVP features
-- Detects code-related prompts and appends a machine-readable GitHub protocol.
-- Detects `<GITHUB_EXTENSION>…</GITHUB_EXTENSION>` in Gemini replies.
-- Validates repository, paths, actions, and protocol version.
-- User must explicitly approve before GitHub is changed.
-- Supports create/update/delete files.
-- Supports direct commit or branch + pull request.
-- GitHub token stays in extension storage and is never inserted into Gemini prompts.
+## מה חדש ב-v0.2.0
 
-## Install
-1. Download or clone this repository.
-2. Open `chrome://extensions` or `edge://extensions`.
-3. Enable Developer mode.
-4. Choose **Load unpacked** and select this repository folder.
-5. Open the extension settings.
-6. Paste a GitHub fine-grained personal access token and `owner/repository`.
-7. Save and test.
+- בחירת מאגר מתוך רשימת המאגרים שה-Token מורשה אליהם.
+- בחירת branch מתוך רשימת הענפים במאגר.
+- כפתור **GitHub** בתוך Gemini לטעינת קבצים מהמאגר ישירות לפרומפט.
+- תצוגת Diff לפני כל שינוי.
+- שינוי של כמה קבצים נשמר כ-**commit יחיד**.
+- מצב מומלץ: יצירת Branch חדש + commit יחיד + Pull Request.
+- תמיכה ביצירה, עדכון ומחיקה של קבצים.
+- אימות repository, base branch, נתיבי קבצים וגרסת פרוטוקול.
+- אין ביצוע אוטומטי: המשתמש חייב לאשר את השינוי בחלונית התוסף.
 
-## Recommended fine-grained token permissions
-Restrict the token to only the repositories you want the extension to access. For this MVP, grant repository **Contents: Read and write**. If using Branch + PR, also grant **Pull requests: Read and write**. Use the minimum permissions required.
+## התקנה
 
-For a distributable/public extension, replace PAT setup with a GitHub App / OAuth authorization-code flow with PKCE.
+1. הורד או שכפל את המאגר.
+2. פתח `chrome://extensions` או `edge://extensions`.
+3. הפעל **Developer mode**.
+4. לחץ **Load unpacked / טען תוסף שלא נארז**.
+5. בחר את תיקיית המאגר.
+6. פתח את הגדרות התוסף.
+7. הדבק Fine-grained Personal Access Token.
+8. לחץ **בדוק חיבור וטען מאגרים**.
+9. בחר מאגר וענף ושמור.
 
-## Protocol example
+## הרשאות Token מומלצות
+
+הגבל את ה-Token רק למאגרים שבהם ברצונך להשתמש.
+
+- **Contents: Read and write**
+- **Pull requests: Read and write** אם משתמשים ב-Branch + PR
+- גישה למטא-דאטה של המאגר ניתנת לפי מנגנון ההרשאות של GitHub.
+
+הטוקן נשמר ב-`chrome.storage.local`, נשלח רק ל-GitHub API ואינו נכתב לפרומפט של Gemini.
+
+## טעינת קבצים ל-Gemini
+
+בדף Gemini מופיע כפתור **GitHub**. לחץ עליו והכנס נתיבי קבצים, אחד בכל שורה, לדוגמה:
+
+```
+src/app.js
+manifest.json
+README.md
+```
+
+התוסף יקרא אותם מהמאגר ומה-branch שנבחרו ויכניס אותם לתיבת ההודעה כהקשר.
+
+## פרוטוקול השינויים
+
+כאשר שיחת קוד דורשת שינוי ב-GitHub, התוסף מוסיף לפרומפט הוראה ל-Gemini להחזיר בסוף התשובה בלוק:
 
 ```text
 <GITHUB_EXTENSION>
-{"version":1,"repository":"owner/repo","base_branch":"main","mode":"branch_pr","commit_message":"Fix layout bug","branch_name":"gemini/fix-layout","pr_title":"Fix layout bug","pr_body":"Fix generated with Gemini GitHub Bridge.","files":[{"path":"src/app.js","action":"update","content":"FULL FILE CONTENT"}]}
+{
+  "version": 1,
+  "repository": "owner/repo",
+  "base_branch": "main",
+  "mode": "branch_pr",
+  "commit_message": "Fix layout bug",
+  "branch_name": "gemini/fix-layout",
+  "pr_title": "Fix layout bug",
+  "pr_body": "Summary",
+  "files": [
+    {
+      "path": "src/app.js",
+      "action": "update",
+      "content": "FULL FINAL FILE CONTENT"
+    }
+  ]
+}
 </GITHUB_EXTENSION>
 ```
 
-## Important limitation
-Gemini's web UI is not a stable public extension API. The content script therefore uses generic DOM detection and may need selector updates when Gemini changes its interface. The GitHub side uses the stable REST API.
+התוסף אינו מבצע את הבלוק מיד. הוא קורא את הקבצים הקיימים, מציג Diff ומבקש אישור.
+
+## Commit מרובה קבצים
+
+v0.2 משתמש ב-Git Data API: נוצרים blobs ו-tree חדשים, ואז commit אחד שמכיל את כל הקבצים. כך שינוי של 10 קבצים אינו יוצר 10 commits.
+
+## אבטחה
+
+- אין Token בפרומפט.
+- המאגר בתשובת Gemini חייב להתאים למאגר שנבחר.
+- גם base branch חייב להתאים לענף שנבחר.
+- נתיבים מוחלטים ונתיבים עם `..` נחסמים.
+- עד 50 קבצים בשינוי אחד.
+- נדרש אישור ידני לפני Commit או PR.
+
+## מגבלה
+
+ממשק Gemini באתר אינו API יציב לתוספי דפדפן. לכן ייתכן שבעתיד שינוי DOM מצד Google יחייב עדכון של מנגנון איתור תיבת ההודעה/כפתור השליחה.
