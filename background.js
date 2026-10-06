@@ -214,7 +214,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const c = await getConfig();
       const user = await gh("/user");
       let repo = null;
-      if (c.repository) repo = await gh(`/repos/${c.repository}`);
+      if (c.repository) {
+        try { repo = await gh(`/repos/${c.repository}`); } catch {}
+      }
       return sendResponse({ok:true, user:{login:user.login}, repo:repo ? {full_name:repo.full_name,default_branch:repo.default_branch,private:repo.private} : null});
     }
     if (msg.type === "LIST_REPOS") return sendResponse({ok:true, repos:await listRepos()});
